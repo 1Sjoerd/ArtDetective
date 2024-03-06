@@ -1,125 +1,257 @@
+import 'dart:convert';
+import 'dart:io';
+import 'package:artdetective/screens/art_screen.dart';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:http/http.dart' as http;
 
-void main() {
-  runApp(const MyApp());
-}
+void main() => runApp(const MyApp());
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
-  // This widget is the root of your application.
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Flutter Demo',
-      theme: ThemeData(
-        // This is the theme of your application.
-        //
-        // TRY THIS: Try running your application with "flutter run". You'll see
-        // the application has a purple toolbar. Then, without quitting the app,
-        // try changing the seedColor in the colorScheme below to Colors.green
-        // and then invoke "hot reload" (save your changes or press the "hot
-        // reload" button in a Flutter-supported IDE, or press "r" if you used
-        // the command line to start the app).
-        //
-        // Notice that the counter didn't reset back to zero; the application
-        // state is not lost during the reload. To reset the state, use hot
-        // restart instead.
-        //
-        // This works for code too, not just values: Most code changes can be
-        // tested with just a hot reload.
-        colorScheme: ColorScheme.fromSeed(seedColor: Color.fromARGB(255, 7, 205, 215)),
-        useMaterial3: true,
-      ),
-      home: const MyHomePage(title: 'Flutter Demo Home Page'),
+      theme: ThemeData( scaffoldBackgroundColor: const Color.fromARGB(255, 255, 255, 255),),
+      home: const HomeScreen(),
     );
   }
 }
 
-class MyHomePage extends StatefulWidget {
-  const MyHomePage({super.key, required this.title});
-
-  // This widget is the home page of your application. It is stateful, meaning
-  // that it has a State object (defined below) that contains fields that affect
-  // how it looks.
-
-  // This class is the configuration for the state. It holds the values (in this
-  // case the title) provided by the parent (in this case the App widget) and
-  // used by the build method of the State. Fields in a Widget subclass are
-  // always marked "final".
-
-  final String title;
+class HomeScreen extends StatefulWidget {
+  const HomeScreen({super.key});
 
   @override
-  State<MyHomePage> createState() => _MyHomePageState();
+  _HomeScreenState createState() => _HomeScreenState();
 }
 
-class _MyHomePageState extends State<MyHomePage> {
-  int _counter = 0;
+class _HomeScreenState extends State<HomeScreen> {
+  File? _image;
+  final picker = ImagePicker();
+  final String apiKey = 'AIzaSyCiM5O2NDBC_iXRV9vHNS4CgneXEIRrJGA';
+  Map<String, dynamic>? recognizedArtwork;
 
-  void _incrementCounter() {
+
+  List<Map<String, dynamic>> artworks = [
+    {
+      "name": "Mona Lisa",
+      "artist": "Leonardo da Vinci",
+      "title": "Mona Lisa",
+      "creationDate": "c. 1503-1506, perhaps continuing until c. 1517",
+      "medium": "Oil on poplar wood",
+      "dimensions": "77 cm × 53 cm",
+      "collection": "Permanent collection of the Louvre",
+      "description": "Portrait of a woman believed to be Lisa Gherardini, known for her enigmatic expression.",
+      "currentLocation": "Louvre Museum, Paris",
+      "labels": [ 
+        "Art", "Painting", "Portrait"
+      ],
+    },
+    {
+      "name": "De Sterrennacht",
+      "artist": "Vincent van Gogh",
+      "title": "De Sterrennacht",
+      "creationDate": "1889",
+      "medium": "Oil on canvas",
+      "dimensions": "73.7 cm × 92.1 cm",
+      "collection": "Permanent collection of the Museum of Modern Art",
+      "description": "Depicts the view from the east-facing window of his asylum room at Saint-Rémy-de-Provence, with a village.",
+      "currentLocation": "Museum of Modern Art, New York",
+      "labels": [
+        "Painting", "Art", "Landscape", "Wood",
+      ],
+    },
+    {
+      "name": "De Schreeuw",
+      "artist": "Edvard Munch",
+      "title": "De Schreeuw",
+      "creationDate": "1893",
+      "medium": "Oil, tempera, and pastel on cardboard",
+      "dimensions": "91 cm × 73.5 cm",
+      "collection": "Several versions exist, held by various collections",
+      "description": "Symbolizes the existential angst and despair of the modern human condition.",
+      "currentLocation": "Various, including the National Gallery, Oslo",
+      "labels": [
+        "Painting", "Art", "Watercolor paint", "Gesture", "Electric blue",
+      ],
+    },
+  ];
+
+  Future getImage(bool isCamera) async {
+    final pickedFile = await picker.pickImage(
+      source: isCamera ? ImageSource.camera : ImageSource.gallery,
+    );
+
     setState(() {
-      // This call to setState tells the Flutter framework that something has
-      // changed in this State, which causes it to rerun the build method below
-      // so that the display can reflect the updated values. If we changed
-      // _counter without calling setState(), then the build method would not be
-      // called again, and so nothing would appear to happen.
-      _counter++;
+      if (pickedFile != null) {
+        _image = File(pickedFile.path);
+        analyzeImage(_image!);
+      } else {
+        print('Geen afbeelding geselecteerd.');
+      }
     });
   }
 
+  Future<void> analyzeImage(File image) async {
+    final bytes = await image.readAsBytes();
+    String base64Image = base64Encode(bytes);
+    String url = 'https://vision.googleapis.com/v1/images:annotate?key=$apiKey';
+    Map<String, dynamic> payload = {
+      "requests": [
+        {
+          "image": {"content": base64Image},
+          "features": [{"type": "LABEL_DETECTION", "maxResults": 10}],
+        }
+      ]
+    };
+
+    try {
+      final response = await http.post(Uri.parse(url),
+          headers: {"Content-Type": "application/json"},
+          body: json.encode(payload));
+
+      if (response.statusCode == 200) {
+        var jsonResponse = json.decode(response.body);
+        var labels = jsonResponse['responses'][0]['labelAnnotations'] as List;
+        print('Ontvangen labels: $labels');
+
+        int highestScore = 0;
+        Map<String, dynamic>? bestMatchArtwork;
+
+        for (var artwork in artworks) {
+          int currentScore = 0;
+
+          for (var label in labels) {
+            var labelDesc = label['description'].toString().toLowerCase();
+            for (var artLabel in artwork['labels']) {
+              if (labelDesc.contains(artLabel.toLowerCase())) {
+                currentScore++;
+              }
+            }
+          }
+
+          if (currentScore > highestScore) {
+            highestScore = currentScore;
+            bestMatchArtwork = artwork;
+          }
+        }
+
+        if (bestMatchArtwork == null) {
+          print("Geen overeenkomend kunstwerk gevonden.");
+          return;
+        }
+
+        setState(() {
+          recognizedArtwork = bestMatchArtwork;
+        });
+
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => ArtScreen(
+              artworkData: recognizedArtwork,
+              artworkImage: _image!,
+            ),
+          ),
+        );
+      } else {
+        print('Google Cloud Vision API fout: ${response.body}');
+      }
+    } catch (e) {
+      print('Er is een fout opgetreden bij het communiceren met Google Cloud Vision API: $e');
+    }
+  }
+
+
+
   @override
   Widget build(BuildContext context) {
-    // This method is rerun every time setState is called, for instance as done
-    // by the _incrementCounter method above.
-    //
-    // The Flutter framework has been optimized to make rerunning build methods
-    // fast, so that you can just rebuild anything that needs updating rather
-    // than having to individually change instances of widgets.
     return Scaffold(
-      appBar: AppBar(
-        // TRY THIS: Try changing the color here to a specific color (to
-        // Colors.amber, perhaps?) and trigger a hot reload to see the AppBar
-        // change color while the other colors stay the same.
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        // Here we take the value from the MyHomePage object that was created by
-        // the App.build method, and use it to set our appbar title.
-        title: Text(widget.title),
-      ),
-      body: Center(
-        // Center is a layout widget. It takes a single child and positions it
-        // in the middle of the parent.
-        child: Column(
-          // Column is also a layout widget. It takes a list of children and
-          // arranges them vertically. By default, it sizes itself to fit its
-          // children horizontally, and tries to be as tall as its parent.
-          //
-          // Column has various properties to control how it sizes itself and
-          // how it positions its children. Here we use mainAxisAlignment to
-          // center the children vertically; the main axis here is the vertical
-          // axis because Columns are vertical (the cross axis would be
-          // horizontal).
-          //
-          // TRY THIS: Invoke "debug painting" (choose the "Toggle Debug Paint"
-          // action in the IDE, or press "p" in the console), to see the
-          // wireframe for each widget.
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: <Widget>[
-            const Text(
-              'You have pushed the button this many times:',
+      body: Stack(
+        children: <Widget>[
+          Opacity(
+            opacity: 0.5,
+            child: Container(
+              decoration: const BoxDecoration(
+                image: DecorationImage(
+                  image: AssetImage("assets/images/kunst.jpg"),
+                  fit: BoxFit.cover,
+                ),
+              ),
             ),
-            Text(
-              '$_counter',
-              style: Theme.of(context).textTheme.headlineMedium,
+          ),
+          Container(
+            color: Colors.white.withOpacity(0.4),
+          ),
+          Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: <Widget>[
+                const Padding(
+                  padding: EdgeInsets.all(0.0),
+                  child: Text(
+                    'ART DETECTIVE',
+                    style: TextStyle(fontSize: 36, color: Colors.black, fontWeight: FontWeight.bold, fontFamily: 'TimesNewRoman',),
+                  ),
+                ),
+                const Padding(
+                  padding: EdgeInsets.all(5.0),
+                  child: Text(
+                    'Take or choose a picture to get more information about the artwork',
+                    style: TextStyle(fontSize: 18, color: Colors.black, fontFamily: 'TimesNewRoman',),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4.0),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.all(10.0),
+                          child: ElevatedButton(
+                            onPressed: () => getImage(true),
+                            style: ElevatedButton.styleFrom(
+                              minimumSize: const Size(double.infinity, 100),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(5.0)),
+                              backgroundColor: Colors.black),
+                            child: const Wrap(
+                              crossAxisAlignment: WrapCrossAlignment.center,
+                              children: [
+                                Icon(Icons.camera_alt, color: Colors.white, size: 64.0),
+                              ],
+                            )
+                          ),
+                        ),
+                      ),
+                      Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.all(10.0),
+                          child: ElevatedButton(
+                            onPressed: () => getImage(false),
+                            style: ElevatedButton.styleFrom(
+                              minimumSize: const Size(double.infinity, 100), 
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(5.0)),
+                              backgroundColor: Colors.black),
+                            child: const Wrap(
+                              crossAxisAlignment: WrapCrossAlignment.center,
+                              children: [
+                                Icon(Icons.photo_library, color: Colors.white, size: 64.0),
+                              ],
+                            )
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ),
-          ],
-        ),
+          ),
+        ],
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _incrementCounter,
-        tooltip: 'Increment',
-        child: const Icon(Icons.add),
-      ), // This trailing comma makes auto-formatting nicer for build methods.
     );
   }
 }

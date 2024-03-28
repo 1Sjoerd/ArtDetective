@@ -29,7 +29,7 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   File? _image;
   final picker = ImagePicker();
-  final String apiKey = 'AIzaSyCiM5O2NDBC_iXRV9vHNS4CgneXEIRrJGA';
+  final String apiKey = key;
   Map<String, dynamic>? recognizedArtwork;
 
 
